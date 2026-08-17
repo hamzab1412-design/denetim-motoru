@@ -32,7 +32,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- ANA EKRAN VE API GİRİŞİ ---
+# --- ANA EKRAN VE KULLANICI API GİRİŞİ ---
 st.title("🏛️ Belediye İmar ve Plan-Proje İnceleme Bürosu - Kapsamlı Akıllı Denetim Masası")
 
 with st.sidebar:
@@ -43,7 +43,6 @@ with st.sidebar:
         st.warning("Devam etmek için API anahtarınızı girin.")
         st.stop()
 
-# API Anahtarı Entegrasyonu
 client = OpenAI(api_key=user_api_key)
 
 # --- 1. ADANA, İSTANBUL VE BALIKESİR TAM BELEDİYE VERİTABANI ---
@@ -189,10 +188,10 @@ def run_master_audit(mimari_file, statik_file, statik_rapor_file, idari_file, se
     Asgari Beton Sınırı: {belediye_kriterleri['min_beton']}
     Kullanılan Eş Anlamlılar Sözlüğü (Alias): {TERIM_SOZLUGU}
     
-    ÖNEMLİ DENETİM KURALI:
-    - Eğer bir statik hesap raporu veya idari evrak PDF olarak yüklenmemişse, doğrudan her şeye "belirtilmemiştir" diyerek başarısız kabul etme.
-    - DXF çizimlerinin içindeki metin bloklarında (TEXT/MTEXT), katmanlarda (layers) veya çizim notlarında (örn. C30, asmolen, yerleşim, rampa vb.) ilgili kurala dair herhangi bir ibare veya anlam bütünlüğü varsa bunu "EVET" ve "doğru_mu: true" olarak değerlendir.
-    - Sadece projede açıkça bir eksiklik veya bariz bir yönetmelik aykırılığı tespit ettiğinde "HAYIR" ver. Aşırı şüpheci olma, yapıcı ve esnek bir denetim yaklaşımı sergile.
+    KESİN DENETİM VE DEĞERLENDİRME KURALLARI (ASLA İHLAL ETME):
+    1. Kesinlikle "bilgi bulunmamaktadır", "belirtilmemiştir" veya "veri yok" gibi kaçamak ifadeler KULLANMAYACAKSIN. 
+    2. Proje dosyaları (DXF/PDF) yüklendiyse, içindeki çizim mantığına, genel mimari standartlara ve terimlere bakarak her maddeye mutlaka net bir **EVET** veya **HAYIR** kararı vereceksin.
+    3. Eğer çizimde veya notlarda en ufak bir uyum veya mantık seziyorsan "cevap": "EVET" ve "dogru_mu": true yap. Açık ve bariz bir yönetmelik ihlali yoksa projeyi reddetme, yapıcı ol.
     
     Kesinlikle geçerli bir JSON formatında yanıt ver. JSON şu anahtarları içermelidir:
     - "mimari_maddeler": sözlük (Her madde için: {{"cevap": "EVET/HAYIR", "dogru_mu": true/false, "detay": "gerekçe"}} )
@@ -256,7 +255,7 @@ def run_master_audit(mimari_file, statik_file, statik_rapor_file, idari_file, se
             model="gpt-4o",
             messages=messages,
             response_format={"type": "json_object"},
-            temperature=0.3  # Esnekliği artırmak için 0.3 yapıldı
+            temperature=0.3
         )
         result_json = json.loads(completion.choices[0].message.content)
         return {
