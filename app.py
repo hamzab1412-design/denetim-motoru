@@ -272,7 +272,7 @@ if st.button("🏛️ Kapsamlı Mühendislik ve Kot/Aks Denetimini Başlat"):
     eksik_listesi = check_dosya_eksikleri(mimari_dxf, statik_dxf, statik_rapor, idari_evraklar)
     
     if eksik_listesi:
-        st.info(f"ℹ️ **Bilgi:** Şu belgeler yüklenmedi: **{', '.join(eksik_listesi)}**. Analiz mevcut DXF etiketleri ve kot/aks verileri üzerinden yürütülecektir.")
+        st.info(f"ℹ️ **Bilgi:** Şu belgeler yüklenmedi: {', '.join(eksik_listesi)}. Analiz mevcut DXF etiketleri ve kot/aks verileri üzerinden yürütülecektir.")
     
     if mimari_dxf or statik_dxf or statik_rapor or idari_evraklar:
         with st.spinner(f"🔄 '{secilen_belediye_profil}' şartlarıyla kot, aks ve baca kontrolleri yapılıyor..."):
@@ -347,7 +347,7 @@ if st.session_state.master_report and st.session_state.audit_data:
                     else:
                         st.markdown(f"🔴 **{cevap}**")
                 
-                if not dogov_mu := not dogru_mu:
+                if not dogru_mu:
                     with st.expander(f"⚠️ Mühendislik Gerekçesini Gör"):
                         st.error(f"**Teknik Gerekçe:** {detay}")
                 st.markdown("---")
