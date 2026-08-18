@@ -28,7 +28,7 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- YENİ MÜHENDİSLİK FONKSİYONLARI ---
+# --- MÜHENDİSLİK YARDIMCI FONKSİYONLARI ---
 def check_merdiven_ve_tarama(dxf_path):
     doc = ezdxf.readfile(dxf_path)
     msp = doc.modelspace()
@@ -48,26 +48,66 @@ def compare_dxf_layers(mimari_path, statik_path):
     plt.close(fig)
     return img_path
 
-# --- ANA ARAYÜZ VE API ---
-st.title("🏛️ Belediye İmar ve Plan-Proje İnceleme Bürosu - Kapsamlı Akıllı Denetim Masası")
+# --- SENİN ORİJİNAL FONKSİYONLARIN ---
+def read_pdf_text(uploaded_file):
+    try:
+        pdf_bytes = uploaded_file.read()
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        text = ""
+        for page in reader.pages:
+            extracted = page.extract_text()
+            if extracted: text += extracted + "\n"
+        return text if text.strip() else "PDF dosyasından metin çıkarılamadı."
+    except Exception as e: return f"PDF okuma hatası: {e}"
 
+def dxf_to_image(dxf_filepath):
+    try:
+        doc = ezdxf.readfile(dxf_filepath)
+        msp = doc.modelspace()
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_axes([0, 0, 1, 1])
+        ctx = RenderContext(doc)
+        out = MatplotlibBackend(ax)
+        Frontend(ctx, out).draw_layout(msp)
+        img_path = "temp_dxf_render.png"
+        plt.savefig(img_path, dpi=150)
+        plt.close(fig)
+        with open(img_path, "rb") as image_file: return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception: return None
+
+def analyze_dxf_structure(dxf_filepath):
+    try:
+        doc = ezdxf.readfile(dxf_filepath)
+        layers = [layer.dxf.name.lower() for layer in doc.layers]
+        texts = [e.dxf.text.strip() for e in doc.modelspace().query('TEXT MTEXT') if e.dxf.text.strip()]
+        return layers, texts
+    except Exception: return [], []
+
+def check_dosya_eksikleri(mimari_file, statik_file, rapor_file, idari_file):
+    eksikler = []
+    if not mimari_file: eksikler.append("Mimari Proje (DXF)")
+    if not statik_file: eksikler.append("Statik Proje (DXF)")
+    if not rapor_file: eksikler.append("Statik Hesap Raporu")
+    if not idari_file: eksikler.append("İmar Durumu / Aplikasyon / Plankote")
+    return eksikler
+
+# --- API VE GİRİŞ ---
 with st.sidebar:
-    st.subheader("🔑 Kullanıcı API Ayarları")
     user_api_key = st.text_input("OpenAI API Anahtarınız:", type="password")
-    if not user_api_key: st.stop()
-
+if not user_api_key: st.stop()
 client = OpenAI(api_key=user_api_key)
 
-# (BELEDIYE_VERITABANI ve diğer fonksiyonların burada sabit kalıyor...)
-# ... (Senin paylaştığın mevcut fonksiyonlar buraya gelecek) ...
+# --- ANA MANTIĞI YÜRÜTEN KISIM ---
+# (Burada orijinal `run_master_audit` fonksiyonunu olduğu gibi kullanmaya devam edebilirsin)
+# ... (Senin orijinal `run_master_audit` fonksiyonunu buraya ekle) ...
 
-# --- KONTROL BUTONU ---
+# --- ARAYÜZ (EK GÜNCELLEME) ---
 if st.button("🏛️ Kapsamlı Mühendislik ve Kot/Aks Denetimini Başlat"):
-    # 1. Dosyaları işle
+    # Önce dosyaları kaydet
     with open("temp_m.dxf", "wb") as f: f.write(mimari_dxf.getvalue())
     with open("temp_s.dxf", "wb") as f: f.write(statik_dxf.getvalue())
     
-    # 2. Otomatik Mühendislik Bulguları
+    # 1. Otomatik Mühendislik Bulguları
     basamak, tarama = check_merdiven_ve_tarama("temp_m.dxf")
     
     st.subheader("🛠️ Otomatik Mühendislik Bulguları")
@@ -75,11 +115,8 @@ if st.button("🏛️ Kapsamlı Mühendislik ve Kot/Aks Denetimini Başlat"):
     c1.metric("Merdiven Basamak", f"{basamak} Adet", "Uygun" if basamak >= 17 else "HATA")
     c2.metric("Kolon Taraması", "Tespit Edildi" if tarama > 0 else "Eksik")
     
-    # 3. Çakıştırma Analizi
-    st.subheader("🔍 Mimari (Mavi) - Statik (Kırmızı) Çakıştırma")
+    # 2. Çakıştırma
     st.image(compare_dxf_layers("temp_m.dxf", "temp_s.dxf"), caption="Görsel Koordinasyon Analizi")
     
-    # 4. Mevcut AI Analizini Çalıştır
+    # 3. Mevcut AI Analizin
     st.session_state.audit_data = run_master_audit(mimari_dxf, statik_dxf, statik_rapor, idari_evraklar, secilen_belediye_profil)
-    
-    # (Bundan sonrası mevcut raporlama mantığın ile devam ediyor...)
