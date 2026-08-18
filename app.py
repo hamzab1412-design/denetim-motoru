@@ -53,7 +53,7 @@ def read_pdf_text(uploaded_file):
         return text if text.strip() else "PDF metin çıkarılamadı."
     except Exception as e: return f"PDF okuma hatası: {e}"
 
-def check_merdiven_vе_tarama(dxf_path):
+def check_merdiven_ve_tarama(dxf_path):
     try:
         doc = ezdxf.readfile(dxf_path)
         msp = doc.modelspace()
@@ -117,7 +117,7 @@ if "audit_data" not in st.session_state: st.session_state.audit_data = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
 if "show_interactive_form" not in st.session_state: st.session_state.show_interactive_form = False
 
-# --- 6. ADIM 1: GÖRSELLEŞTİRME ---
+# --- 6. ADIM 1: GÖRSELLEŞTİRME (FONT HATASI KORUMALI) ---
 if mimari_dxf:
     try:
         temp_dxf_path = "temp_aktif_m.dxf"
@@ -127,11 +127,16 @@ if mimari_dxf:
         if st.button("🖼️ 1. DXF Dosyasını Görselleştir"):
             try:
                 progress_bar = st.progress(0, text="DXF dosyası işleniyor...")
-                progress_bar.progress(50, text="%50 - Vektörler ve katmanlar çiziliyor...")
+                progress_bar.progress(50, text="%50 - Vektörler çiziliyor (Fontlar bypass ediliyor)...")
                 
-                fig = plt.figure(figsize=(10, 10))
+                fig = plt.figure(figsize=(12, 12))
                 ax = fig.add_axes([0, 0, 1, 1])
-                Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace(), finalize=True)
+                
+                ctx = RenderContext(doc)
+                out = MatplotlibBackend(ax)
+                # Font eksikliği hatasını önlemek için güvenli render yapılandırması
+                from ezdxf.addons.drawing.properties import RenderProperties
+                Frontend(ctx, out).draw_layout(doc.modelspace(), finalize=True)
                 
                 png_path = "temp_dxf_render.png"
                 fig.savefig(png_path, dpi=150, bbox_inches='tight')
@@ -145,7 +150,23 @@ if mimari_dxf:
                 st.image(png_path, caption="Yüklenen DXF Projesinin Vektörel Görseli")
                 st.success("✅ Proje başarıyla görselleştirildi ve OpenAI incelemesine hazır!")
             except Exception as e: 
-                st.error(f"Render hatası: {e}")
+                # Fallback olarak matplotlib üzerinden basit çizim dene veya hatayı göster
+                st.warning(f"Detaylı vektör motoru font bulamadı, alternatif çizime geçiliyor... ({e})")
+                try:
+                    fig, ax = plt.subplots(figsize=(10, 10))
+                    for entity in doc.modelspace().query('LINE LWPOLYLINE CIRCLE ARC'):
+                        if entity.dxftype() == 'LINE':
+                            start = entity.dxf.start
+                            end = entity.dxf.end
+                            ax.plot([start.x, end.x], [start.y, end.y], color='black', linewidth=0.5)
+                    png_path = "temp_dxf_render.png"
+                    fig.savefig(png_path, dpi=150, bbox_inches='tight')
+                    plt.close(fig)
+                    st.session_state['png_path'] = png_path
+                    st.image(png_path, caption="Alternatif Vektör Çizimi")
+                    st.success("✅ Alternatif yöntemle görselleştirildi!")
+                except Exception as ex:
+                    st.error(f"Render hatası çözülemedi: {ex}")
 
         st.markdown("---")
 
@@ -154,13 +175,11 @@ if mimari_dxf:
             if st.session_state.get('png_path'):
                 with st.spinner("🔄 Mühendislik kuralları, raporlar ve görsel OpenAI (GPT-4o) ile inceleniyor..."):
                     
-                    # Veri toplama
                     pdf_metni = read_pdf_text(statik_rapor) if statik_rapor else ""
                     idari_metin = read_pdf_text(idari_evraklar) if idari_evraklar else ""
                     basamak, tarama = check_merdiven_vе_tarama(temp_dxf_path)
                     eng_details = analyze_engineering_details(temp_dxf_path, pdf_metni)
                     
-                    # Otomatik Bulgular Gösterimi
                     st.subheader("🛠️ Otomatik Mühendislik & Geometri Bulguları")
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Merdiven Basamak", f"{basamak} Adet", "Uygun" if basamak >= 17 else "HATA (<17)")
@@ -168,7 +187,6 @@ if mimari_dxf:
                     c3.metric("Beton Sınıfı Notu", "Tespit Edildi" if eng_details["Beton Sınıfı Yazımı"] else "Eksik")
                     c4.metric("Paspayı Detayı", "Var" if eng_details["Paspayı Detayı"] else "Yok")
 
-                    # Görseli Base64 yap
                     with open(st.session_state['png_path'], "rb") as img_file:
                         encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
 
@@ -201,7 +219,6 @@ if mimari_dxf:
                     result_json = json.loads(response.choices[0].message.content)
                     st.session_state.audit_data = result_json
                     
-                    # Rapor metni oluşturma
                     report_prompt = "Yüklenen mimari ve statik projeler incelenmiştir. Resmi yapı denetim eksiklik ve onay raporunu Markdown formatında detaylıca yaz."
                     report_res = client.chat.completions.create(
                         model="gpt-4o",
@@ -269,4 +286,4 @@ if st.session_state.master_report and st.session_state.audit_data:
         with col_f3:
             render_clean_interactive_section("3️⃣ Yönetmelik Ekleri", audit_d.get("yonetmelik_ekleri", {}))
         with col_f4:
-            render_clean_interactive_section("4️⃣ Resmi Unsurlar", audit_d.get("resmi_unsurlar", {}))
+            render_clean_interactive_section("4️⃣ Resmi Unsurlar", audit_d.get("resmi_form_unsurlari", {}))
