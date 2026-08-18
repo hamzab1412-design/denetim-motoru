@@ -7,12 +7,9 @@ import time
 import matplotlib.pyplot as plt
 from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+from ezdxf.addons.drawing.config import Configuration, FontPolicy
 from openai import OpenAI
 from pypdf import PdfReader
-
-# Matplotlib genel font ayarı (Font hatasını kökünden önler)
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Liberation Sans']
-plt.rcParams['axes.unicode_minus'] = False
 
 # Sayfa Ayarları
 st.set_page_config(layout="wide", page_title="Master Denetim Motoru - Komple Sistem")
@@ -114,7 +111,7 @@ if "audit_data" not in st.session_state: st.session_state.audit_data = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
 if "show_interactive_form" not in st.session_state: st.session_state.show_interactive_form = False
 
-# --- 6. ADIM 1: GERÇEK VE TAM GÖRSELLEŞTİRME ---
+# --- 6. ADIM 1: GÖRSELLEŞTİRME (FONT HATASI KORUMALI TAM RENDER) ---
 if mimari_dxf:
     try:
         temp_dxf_path = "temp_aktif_m.dxf"
@@ -124,15 +121,16 @@ if mimari_dxf:
         if st.button("🖼️ 1. DXF Dosyasını Görselleştir"):
             try:
                 progress_bar = st.progress(0, text="DXF dosyası işleniyor...")
-                progress_bar.progress(50, text="%50 - Tüm katmanlar ve vektörler render ediliyor...")
+                progress_bar.progress(50, text="%50 - Vektörler ve katmanlar çiziliyor...")
                 
                 fig = plt.figure(figsize=(14, 14))
                 ax = fig.add_axes([0, 0, 1, 1])
                 
-                # Orijinal ezdxf çizim motoru (matplotlib font ayarları yapıldığı için artık hata vermez)
+                # Font eksikliği hatasını önleyen güvenli render ayarı
+                config = Configuration(font_policy=FontPolicy.IGNORE_AND_DEFAULT)
                 ctx = RenderContext(doc)
                 out = MatplotlibBackend(ax)
-                Frontend(ctx, out).draw_layout(doc.modelspace(), finalize=True)
+                Frontend(ctx, out, config=config).draw_layout(doc.modelspace(), finalize=True)
                 
                 png_path = "temp_dxf_render.png"
                 fig.savefig(png_path, dpi=200, bbox_inches='tight')
@@ -143,8 +141,8 @@ if mimari_dxf:
                 progress_bar.empty()
                 
                 st.session_state['png_path'] = png_path
-                st.image(png_path, caption="Yüklenen Mimari Projenin Tam Vektörel Görseli")
-                st.success("✅ Proje eksiksiz bir şekilde görselleştirildi ve OpenAI incelemesine hazır!")
+                st.image(png_path, caption="Yüklenen DXF Projesinin Vektörel Görseli")
+                st.success("✅ Proje başarıyla görselleştirildi ve OpenAI incelemesine hazır!")
             except Exception as e: 
                 st.error(f"Render hatası: {e}")
 
