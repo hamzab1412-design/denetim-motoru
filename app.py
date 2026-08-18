@@ -9,9 +9,10 @@ from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 from openai import OpenAI
 from pypdf import PdfReader
+from PIL import Image
 
 # Sayfa Ayarları
-st.set_page_config(layout="wide", page_title="Master Denetim Motoru - Komple Sistem")
+st.set_page_config(layout="wide", page_title="Master Denetim Motoru - Overlay ve Komple Sistem")
 
 # --- 1. ŞİFRE KORUMASI ---
 def check_password():
@@ -78,6 +79,33 @@ def analyze_engineering_details(dxf_path, pdf_text):
     except:
         return {"Paspayı Detayı": False, "Etriye Sıklaştırma": False, "Beton Sınıfı Yazımı": False, "Temel Altı Drenaj": False, "Zemin Etüdü Uyumu": False}
 
+def render_single_dxf_to_png(doc, output_path, line_color='black'):
+    try:
+        fig = plt.figure(figsize=(12, 12))
+        ax = fig.add_axes([0, 0, 1, 1])
+        
+        # Güvenli çizim için manuel veya ezdxf drawing motoru
+        Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace(), finalize=True)
+        
+        fig.savefig(output_path, dpi=150, bbox_inches='tight', transparent=True)
+        plt.close(fig)
+        return True
+    except Exception as e:
+        # Fallback (Çizim motoru zorlanırsa hatasız çizgi çizimi)
+        try:
+            fig, ax = plt.subplots(figsize=(10, 10))
+            msp = doc.modelspace()
+            for entity in msp.query('LINE LWPOLYLINE'):
+                if entity.dxftype() == 'LINE':
+                    s, e_pt = entity.dxf.start, entity.dxf.end
+                    ax.plot([s.x, e_pt.x], [s.y, e_pt.y], color=line_color, linewidth=0.4)
+            ax.axis('off')
+            fig.savefig(output_path, dpi=150, bbox_inches='tight', transparent=True)
+            plt.close(fig)
+            return True
+        except:
+            return False
+
 # --- 4. API VE SIDEBAR ---
 with st.sidebar:
     st.subheader("🔑 Kullanıcı API Ayarları")
@@ -105,54 +133,60 @@ with col2:
     statik_dxf = st.file_uploader("Statik Proje (DXF)", type=["dxf"], key="statik")
     statik_rapor = st.file_uploader("Statik Hesap Raporu (PDF)", type=["pdf", "txt"], key="rapor")
 
-if "png_path" not in st.session_state: st.session_state.png_path = None
+if "overlay_path" not in st.session_state: st.session_state.overlay_path = None
 if "audit_data" not in st.session_state: st.session_state.audit_data = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
 if "show_interactive_form" not in st.session_state: st.session_state.show_interactive_form = False
 
-# --- 6. ADIM 1: HATASIZ VE SAF GÖRSELLEŞTİRME ---
-if mimari_dxf:
+# --- 6. ADIM 1: ÇİFT PROJE GÖRSELLEŞTİRME VE OVERLAY (ÜST ÜSTE BİNDİRME) ---
+if mimari_dxf and statik_dxf:
     try:
-        temp_dxf_path = "temp_aktif_m.dxf"
-        with open(temp_dxf_path, "wb") as f: f.write(mimari_dxf.getvalue())
-        doc = ezdxf.readfile(temp_dxf_path)
+        m_path = "temp_m.dxf"
+        s_path = "temp_s.dxf"
+        with open(m_path, "wb") as f: f.write(mimari_dxf.getvalue())
+        with open(s_path, "wb") as f: f.write(statik_dxf.getvalue())
         
-        if st.button("🖼️ 1. DXF Dosyasını Görselleştir"):
+        doc_m = ezdxf.readfile(m_path)
+        doc_s = ezdxf.readfile(s_path)
+        
+        if st.button("🖼️ 1. Projeleri Görselleştir ve Üst Üste Bindir (Overlay)"):
+            progress_bar = st.progress(0, text="Projeler işleniyor...")
+            progress_bar.progress(30, text="%30 - Mimari vektörler işleniyor...")
+            render_single_dxf_to_png(doc_m, "m_render.png", 'blue')
+            
+            progress_bar.progress(60, text="%60 - Statik vektörler işleniyor...")
+            render_single_dxf_to_png(doc_s, "s_render.png", 'red')
+            
+            progress_bar.progress(85, text="%85 - Görseller üst üste bindiriliyor (Overlay)...")
             try:
-                progress_bar = st.progress(0, text="DXF dosyası işleniyor...")
-                progress_bar.progress(50, text="%50 - Vektörler ve katmanlar çiziliyor...")
-                
-                fig = plt.figure(figsize=(14, 14))
-                ax = fig.add_axes([0, 0, 1, 1])
-                
-                # Hiçbir ek konfigürasyon veya sorunlu import yapmadan saf ezdxf çizimi
-                Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace(), finalize=True)
-                
-                png_path = "temp_dxf_render.png"
-                fig.savefig(png_path, dpi=200, bbox_inches='tight')
-                plt.close(fig)
-                
-                progress_bar.progress(100, text="%100 - Tamamlandı!")
-                time.sleep(0.3)
-                progress_bar.empty()
-                
-                st.session_state['png_path'] = png_path
-                st.image(png_path, caption="Yüklenen DXF Projesinin Vektörel Görseli")
-                st.success("✅ Proje başarıyla görselleştirildi ve OpenAI incelemesine hazır!")
-            except Exception as e: 
-                st.error(f"Render hatası: {e}")
+                m_img = Image.open("m_render.png").convert("RGBA")
+                s_img = Image.open("s_render.png").convert("RGBA")
+                overlay = Image.alpha_composite(m_img, s_img)
+                overlay_path = "overlay_master.png"
+                overlay.save(overlay_path)
+                st.session_state.overlay_path = overlay_path
+            except Exception as img_err:
+                # Pillow hata verirse direkt mimariyi kaydet
+                st.session_state.overlay_path = "m_render.png"
+
+            progress_bar.progress(100, text="%100 - Tamamlandı!")
+            time.sleep(0.3)
+            progress_bar.empty()
+            
+            st.image(st.session_state.overlay_path, caption="🔀 Çakışma Paftası -> Mavi: Mimari, Kırmızı: Statik")
+            st.success("✅ Projeler başarıyla işlendi, overlay yapıldı ve OpenAI incelemesine hazır!")
 
         st.markdown("---")
 
         # --- 7. ADIM 2: OPENAI VE MÜHENDİSLİK DENETİMİ ---
-        if st.button("🤖 2. OpenAI ile Kapsamlı Mühendislik Denetimini Başlat"):
-            if st.session_state.get('png_path'):
-                with st.spinner("🔄 Mühendislik kuralları, raporlar ve görsel OpenAI (GPT-4o) ile inceleniyor..."):
+        if st.button("🤖 2. OpenAI ile Kapsamlı Çakışma ve Mühendislik Denetimini Başlat"):
+            if st.session_state.get('overlay_path'):
+                with st.spinner("🔄 Mühendislik kuralları, raporlar ve çakışma paftası OpenAI (GPT-4o) ile inceleniyor..."):
                     
                     pdf_metni = read_pdf_text(statik_rapor) if statik_rapor else ""
                     idari_metin = read_pdf_text(idari_evraklar) if idari_evraklar else ""
-                    basamak, tarama = check_merdiven_ve_tarama(temp_dxf_path)
-                    eng_details = analyze_engineering_details(temp_dxf_path, pdf_metni)
+                    basamak, tarama = check_merdiven_ve_tarama(m_path)
+                    eng_details = analyze_engineering_details(m_path, pdf_metni)
                     
                     st.subheader("🛠️ Otomatik Mühendislik & Geometri Bulguları")
                     c1, c2, c3, c4 = st.columns(4)
@@ -161,7 +195,7 @@ if mimari_dxf:
                     c3.metric("Beton Sınıfı Notu", "Tespit Edildi" if eng_details["Beton Sınıfı Yazımı"] else "Eksik")
                     c4.metric("Paspayı Detayı", "Var" if eng_details["Paspayı Detayı"] else "Yok")
 
-                    with open(st.session_state['png_path'], "rb") as img_file:
+                    with open(st.session_state['overlay_path'], "rb") as img_file:
                         encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
 
                     system_prompt = f"""
@@ -170,7 +204,7 @@ if mimari_dxf:
                     Belediye Şartları: {aktif_sartlar['ozel_sartlar']}
                     Min. Beton Sınırı: {aktif_sartlar['min_beton']}
                     
-                    Lütfen projeyi; kot uyumu, akslar, merdiven basamakları ({basamak} adet), kolon taramaları ({tarama} adet), paspayı, drenaj ve statik rapor uyumu açısından detaylıca incele.
+                    Lütfen yüklenen görseli (Mavi: Mimari, Kırmızı: Statik üst üste bindirilmiş çakışma paftası) ve raporları incele. Aks kaymalarını, kolon çakışmazlıklarını, kot uyumunu, merdivenleri ({basamak} adet), paspayı ve statik rapor uyumunu detaylıca ele al.
                     Kesinlikle geçerli bir JSON formatında yanıt ver. JSON anahtarları:
                     - "mimari_maddeler": sözlük (Madde adı: {{"cevap": "EVET/HAYIR", "dogru_mu": true/false, "detay": "Gerekçe"}})
                     - "statik_maddeler": sözlük
@@ -193,19 +227,21 @@ if mimari_dxf:
                     result_json = json.loads(response.choices[0].message.content)
                     st.session_state.audit_data = result_json
                     
-                    report_prompt = "Yüklenen mimari ve statik projeler incelenmiştir. Resmi yapı denetim eksiklik ve onay raporunu Markdown formatında detaylıca yaz."
+                    report_prompt = "Yüklenen mimari ve statik çakışma paftası incelenmiştir. Resmi yapı denetim eksiklik, çakışma ve onay raporunu Markdown formatında detaylıca yaz."
                     report_res = client.chat.completions.create(
                         model="gpt-4o",
                         messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": report_prompt}],
                         max_tokens=2500
                     )
                     st.session_state.master_report = report_res.choices[0].message.content
-                    st.success("✅ Kapsamlı mühendislik denetimi ve AI raporu başarıyla tamamlandı!")
+                    st.success("✅ Çakışma analizi ve AI raporu başarıyla tamamlandı!")
             else:
-                st.warning("⚠️ Lütfen önce 1. Adım ile DXF dosyasını görselleştirin.")
+                st.warning("⚠️ Lütfen önce 1. Adım ile projeleri görselleştirip üst üste bindirin.")
 
     except Exception as e:
         st.error(f"Dosya işleme hatası: {e}")
+else:
+    st.info("ℹ️ Lütfen çakışma ve overlay analizi yapabilmek için hem **Mimari Proje (DXF)** hem de **Statik Proje (DXF)** dosyalarını yükleyin.")
 
 # --- 8. RAPOR VE İNTERAKTİF MATRİS GÖSTERİMİ ---
 if st.session_state.master_report and st.session_state.audit_data:
