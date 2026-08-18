@@ -7,7 +7,6 @@ import time
 import matplotlib.pyplot as plt
 from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
-from ezdxf.addons.drawing.config import Configuration, FontPolicy
 from openai import OpenAI
 from pypdf import PdfReader
 
@@ -111,7 +110,7 @@ if "audit_data" not in st.session_state: st.session_state.audit_data = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
 if "show_interactive_form" not in st.session_state: st.session_state.show_interactive_form = False
 
-# --- 6. ADIM 1: GÖRSELLEŞTİRME (FONT HATASI KORUMALI TAM RENDER) ---
+# --- 6. ADIM 1: HATASIZ VE SAF GÖRSELLEŞTİRME ---
 if mimari_dxf:
     try:
         temp_dxf_path = "temp_aktif_m.dxf"
@@ -126,11 +125,8 @@ if mimari_dxf:
                 fig = plt.figure(figsize=(14, 14))
                 ax = fig.add_axes([0, 0, 1, 1])
                 
-                # Font eksikliği hatasını önleyen güvenli render ayarı
-                config = Configuration(font_policy=FontPolicy.IGNORE_AND_DEFAULT)
-                ctx = RenderContext(doc)
-                out = MatplotlibBackend(ax)
-                Frontend(ctx, out, config=config).draw_layout(doc.modelspace(), finalize=True)
+                # Hiçbir ek konfigürasyon veya sorunlu import yapmadan saf ezdxf çizimi
+                Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace(), finalize=True)
                 
                 png_path = "temp_dxf_render.png"
                 fig.savefig(png_path, dpi=200, bbox_inches='tight')
