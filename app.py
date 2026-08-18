@@ -21,31 +21,56 @@ if not st.session_state.auth:
         st.rerun()
     st.stop()
 
-# --- 2. HATA VERMEYEN PROFESYONEL RENDER MOTORU ---
+# --- 2. ÇÖKMEYEN GÜVENLİ RENDER MOTORU ---
 def render_autocad_style(dxf_path, output_path, line_color='black'):
-    doc = ezdxf.readfile(dxf_path)
-    msp = doc.modelspace()
-    
-    fig = plt.figure(figsize=(15, 15))
-    ax = fig.add_axes([0, 0, 1, 1])
-    
-    # Font hatası veren MTEXT/TEXT öğelerini geçici olarak süzerek (gizleyerek) çizdiriyoruz
-    # Böylece AutoCAD geometrisi, çizgileri, kolonları ve taramaları tam olarak görünür
-    class SafeFrontend(Frontend):
-        def draw_mtext_entity(self, entity, properties):
-            pass # Yazı hatasını engellemek için pas geç
-        def draw_text_entity(self, entity, properties):
-            pass # Yazı hatasını engellemek için pas geç
+    try:
+        doc = ezdxf.readfile(dxf_path)
+        msp = doc.modelspace()
+        
+        fig = plt.figure(figsize=(15, 15))
+        ax = fig.add_axes([0, 0, 1, 1])
+        
+        class SafeFrontend(Frontend):
+            def draw_mtext_entity(self, entity, properties): pass
+            def draw_text_entity(self, entity, properties): pass
+            def draw_image_entity(self, entity, properties): pass
 
-    ctx = RenderContext(doc)
-    out = MatplotlibBackend(ax)
-    frontend = SafeFrontend(ctx, out)
-    frontend.draw_layout(msp, finalize=True)
-    
-    ax.set_aspect('equal')
-    ax.axis('off')
-    fig.savefig(output_path, dpi=300, bbox_inches='tight', transparent=True)
-    plt.close(fig)
+        ctx = RenderContext(doc)
+        out = MatplotlibBackend(ax)
+        frontend = SafeFrontend(ctx, out)
+        frontend.draw_layout(msp, finalize=True)
+        
+        ax.set_aspect('equal')
+        ax.axis('off')
+        fig.savefig(output_path, dpi=300, bbox_inches='tight', transparent=True)
+        plt.close(fig)
+        return True
+    except Exception as render_err:
+        # Eğer gelişmiş motor statik dosyada patlarsa, doğrudan güvenli vektör çizgi moduna geç (Çökme engellenir)
+        try:
+            fig, ax = plt.subplots(figsize=(12, 12))
+            msp = ezdxf.readfile(dxf_path).modelspace()
+            for entity in msp.query('LINE LWPOLYLINE CIRCLE ARC'):
+                etype = entity.dxftype()
+                if etype == 'LINE':
+                    s, e_pt = entity.dxf.start, entity.dxf.end
+                    ax.plot([s.x, e_pt.x], [s.y, e_pt.y], color=line_color, linewidth=0.4)
+                elif etype == 'LWPOLYLINE':
+                    pts = entity.get_points()
+                    x = [p[0] for p in pts]
+                    y = [p[1] for p in pts]
+                    if entity.closed and len(pts) > 0:
+                        x.append(pts[0][0])
+                        y.append(pts[0][1])
+                    ax.plot(x, y, color=line_color, linewidth=0.4)
+            ax.set_aspect('equal')
+            ax.axis('off')
+            fig.savefig(output_path, dpi=200, bbox_inches='tight', transparent=True)
+            plt.close(fig)
+            return True
+        except Exception as inner_err:
+            st.error(f"Kritik Dosya Okuma Hatası: {inner_err}")
+            return False
 
 # --- 3. ARAYÜZ ---
 st.title("🏗️ MRB Mimarlık - Profesyonel AutoCAD Pafta İnceleme")
@@ -57,18 +82,18 @@ s_file = col2.file_uploader("Statik (DXF)", type=["dxf"], key="s")
 if m_file:
     with open("m.dxf", "wb") as f: f.write(m_file.getvalue())
     if st.button("🖼️ Mimariyi AutoCAD Gibi Render Et"):
-        with st.spinner("Pafta işleniyor..."):
-            render_autocad_style("m.dxf", "m_render.png")
-            st.image("m_render.png", caption="Mimari Pafta (AutoCAD Kalitesinde)")
-            st.session_state.m_png = "m_render.png"
+        with st.spinner("Mimari pafta işleniyor..."):
+            if render_autocad_style("m.dxf", "m_render.png", 'black'):
+                st.image("m_render.png", caption="Mimari Pafta")
+                st.session_state.m_png = "m_render.png"
 
 if s_file:
     with open("s.dxf", "wb") as f: f.write(s_file.getvalue())
     if st.button("🖼️ Statiği AutoCAD Gibi Render Et"):
-        with st.spinner("Pafta işleniyor..."):
-            render_autocad_style("s.dxf", "s_render.png")
-            st.image("s_render.png", caption="Statik Pafta (AutoCAD Kalitesinde)")
-            st.session_state.s_png = "s_render.png"
+        with st.spinner("Statik pafta işleniyor... (Güvenli mod aktif)"):
+            if render_autocad_style("s.dxf", "s_render.png", 'black'):
+                st.image("s_render.png", caption="Statik Pafta")
+                st.session_state.s_png = "s_render.png"
 
 # --- 4. OVERLAY VE ANALİZ ---
 if st.session_state.get("m_png") and st.session_state.get("s_png"):
