@@ -42,33 +42,23 @@ def compare_dxf_layers(mimari_path, statik_path):
     try:
         doc_m = ezdxf.readfile(mimari_path)
         doc_s = ezdxf.readfile(statik_path)
-        fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_axes([0, 0, 1, 1])
-        Frontend(RenderContext(doc_m), MatplotlibBackend(ax, color_mode='mono', style={'color': 'blue'})).draw_layout(doc_m.modelspace())
-        Frontend(RenderContext(doc_s), MatplotlibBackend(ax, color_mode='mono', style={'color': 'red'})).draw_layout(doc_s.modelspace())
+        fig, ax = plt.subplots(figsize=(10, 10))
+        
+        ctx_m = RenderContext(doc_m)
+        out_m = MatplotlibBackend(ax)
+        Frontend(ctx_m, out_m).draw_layout(doc_m.modelspace(), finalize=True)
+        
+        ctx_s = RenderContext(doc_s)
+        out_s = MatplotlibBackend(ax)
+        Frontend(ctx_s, out_s).draw_layout(doc_s.modelspace(), finalize=True)
+        
         img_path = "comparison.png"
-        plt.savefig(img_path, dpi=150)
+        plt.savefig(img_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
         return img_path
-    except: return None
-
-def read_pdf_text(uploaded_file):
-    try:
-        pdf_bytes = uploaded_file.read()
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        text = ""
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted: text += extracted + "\n"
-        return text if text.strip() else "PDF metin çıkarılamadı."
-    except: return "PDF okuma hatası"
-
-def analyze_dxf_structure(dxf_filepath):
-    try:
-        doc = ezdxf.readfile(dxf_filepath)
-        texts = [e.dxf.text.strip() for e in doc.modelspace().query('TEXT MTEXT') if e.dxf.text.strip()]
-        return texts
-    except: return []
+    except Exception as e:
+        print(f"Çakıştırma hatası: {e}")
+        return None
 
 # --- 3. VERİTABANI VE API ---
 BELEDIYE_VERITABANI = {
@@ -107,7 +97,11 @@ if st.button("🏗️ Kapsamlı Mühendislik Analizini Başlat"):
         c2.metric("Kolon Taraması", "Tespit Edildi" if tarama > 0 else "Eksik")
         
         st.subheader("🔍 Mimari-Statik Çakıştırma Analizi")
-        st.image(compare_dxf_layers("temp_m.dxf", "temp_s.dxf"), caption="Mavi: Mimari, Kırmızı: Statik")
+        comp_img = compare_dxf_layers("temp_m.dxf", "temp_s.dxf")
+        if comp_img:
+            st.image(comp_img, caption="Mavi: Mimari, Kırmızı: Statik")
+        else:
+            st.warning("DXF çizimleri görselleştirilemedi, ancak metinsel analizler yürütülebilir.")
         
         st.success("Mühendislik ve geometri analizleri tamamlandı.")
     else:
