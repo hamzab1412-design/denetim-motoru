@@ -1,108 +1,82 @@
 import streamlit as st
 import ezdxf
-import json
-import base64
-import io
 import matplotlib.pyplot as plt
 from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
-from openai import OpenAI
-from pypdf import PdfReader
+import io
 
 # Sayfa Ayarları
-st.set_page_config(layout="wide", page_title="Master Denetim Motoru (Gelişmiş Mühendislik Analizi)")
+st.set_page_config(layout="wide", page_title="Master Denetim Motoru - Mühendislik Modülü")
 
-# --- 1. ŞİFRE KORUMASI ---
-def check_password():
-    if "password_correct" not in st.session_state: st.session_state.password_correct = False
-    if not st.session_state.password_correct:
-        st.title("🔐 MRB Mimarlık - Denetim Motoru Giriş")
-        password = st.text_input("Şifreyi Giriniz:", type="password")
-        if st.button("Giriş Yap"):
-            if password == "MRB_Mimarlık_123":
-                st.session_state.password_correct = True
-                st.rerun()
-            else: st.error("❌ Hatalı Şifre!")
-        return False
-    return True
-
-if not check_password(): st.stop()
-
-# --- 2. MÜHENDİSLİK VE YARDIMCI FONKSİYONLAR ---
+# --- GELİŞMİŞ ANALİZ FONKSİYONLARI ---
 def check_merdiven_ve_tarama(dxf_path):
     try:
         doc = ezdxf.readfile(dxf_path)
         msp = doc.modelspace()
-        basamak = len([l for l in msp.query('LINE') if l.dxf.layer.lower() in ['merdiven', 'stairs']])
-        tarama = len([h for h in msp.query('HATCH') if h.dxf.layer.lower() in ['kolon', 'column', 'st-kolon']])
+        # Katman adlarını genişlettik
+        merdiven_layer_names = ['merdiven', 'stairs', 'merdiven-basamak', 'stairs-steps', 'merdiven-plan']
+        tarama_layer_names = ['kolon', 'column', 'st-kolon', 'betonarme', 'kolon-tarama']
+        
+        basamak = len([l for l in msp.query('LINE') if l.dxf.layer.lower() in merdiven_layer_names])
+        tarama = len([h for h in msp.query('HATCH') if h.dxf.layer.lower() in tarama_layer_names])
         return basamak, tarama
     except: return 0, 0
 
 def compare_dxf_layers(mimari_path, statik_path):
+    """Görselleştirme sorunlarını çözmek için daha sağlam bir çizim yöntemi."""
     try:
         doc_m = ezdxf.readfile(mimari_path)
         doc_s = ezdxf.readfile(statik_path)
-        fig, ax = plt.subplots(figsize=(10, 10))
         
-        ctx_m = RenderContext(doc_m)
-        out_m = MatplotlibBackend(ax)
-        Frontend(ctx_m, out_m).draw_layout(doc_m.modelspace(), finalize=True)
+        fig, ax = plt.subplots(figsize=(12, 12))
         
-        ctx_s = RenderContext(doc_s)
-        out_s = MatplotlibBackend(ax)
-        Frontend(ctx_s, out_s).draw_layout(doc_s.modelspace(), finalize=True)
+        # Çizim ayarlarını optimize et
+        def draw_dxf(doc, color, ax):
+            ctx = RenderContext(doc)
+            out = MatplotlibBackend(ax)
+            Frontend(ctx, out).draw_layout(doc.modelspace(), finalize=True)
+            for artist in ax.get_children():
+                if hasattr(artist, 'set_color'): artist.set_color(color)
+        
+        draw_dxf(doc_m, 'blue', ax)
+        draw_dxf(doc_s, 'red', ax)
         
         img_path = "comparison.png"
-        plt.savefig(img_path, dpi=150, bbox_inches='tight')
+        plt.savefig(img_path, dpi=200, bbox_inches='tight')
         plt.close(fig)
         return img_path
     except Exception as e:
-        print(f"Çakıştırma hatası: {e}")
+        st.error(f"Görselleştirme hatası: {e}")
         return None
 
-# --- 3. VERİTABANI VE API ---
-BELEDIYE_VERITABANI = {
-    "Bakanlık Standartları": {"min_beton": "C30", "ozel_sartlar": "Planlı Alanlar İmar Yönetmeliği"},
-    "Adana Büyükşehir Belediyesi": {"min_beton": "C35", "ozel_sartlar": "Adana İmar Yönetmeliği"}
-}
-
-with st.sidebar:
-    user_api_key = st.text_input("OpenAI API Anahtarınız:", type="password")
-if not user_api_key: st.stop()
-client = OpenAI(api_key=user_api_key)
-
-# --- 4. ARAYÜZ ---
-st.title("🏛️ Master Yapı Denetim Uzman Mühendislik Modülü")
-secilen_belediye_profil = st.selectbox("Denetimin tabi olacağı belediye:", list(BELEDIYE_VERITABANI.keys()))
+# --- ARAYÜZ ---
+st.title("🏛️ Yapı Denetim Uzman Mühendislik Modülü")
 
 col1, col2 = st.columns(2)
 with col1:
-    mimari_dxf = st.file_uploader("Mimari Proje (DXF)", type=["dxf"])
-    idari_evrak = st.file_uploader("İdari Evrak (PDF)", type=["pdf"])
+    mimari_dxf = st.file_uploader("Mimari Proje (DXF)", type=["dxf"], key="m")
 with col2:
-    statik_dxf = st.file_uploader("Statik Proje (DXF)", type=["dxf"])
-    statik_rapor = st.file_uploader("Statik Hesap Raporu (PDF)", type=["pdf"])
+    statik_dxf = st.file_uploader("Statik Proje (DXF)", type=["dxf"], key="s")
 
 if st.button("🏗️ Kapsamlı Mühendislik Analizini Başlat"):
     if mimari_dxf and statik_dxf:
-        with open("temp_m.dxf", "wb") as f: f.write(mimari_dxf.getvalue())
-        with open("temp_s.dxf", "wb") as f: f.write(statik_dxf.getvalue())
+        with open("m.dxf", "wb") as f: f.write(mimari_dxf.getvalue())
+        with open("s.dxf", "wb") as f: f.write(statik_dxf.getvalue())
         
-        # Analizler
-        basamak, tarama = check_merdiven_ve_tarama("temp_m.dxf")
-        
+        # 1. Mühendislik Bulguları
+        basamak, tarama = check_merdiven_ve_tarama("m.dxf")
         st.subheader("🛠️ Otomatik Mühendislik Bulguları")
         c1, c2 = st.columns(2)
-        c1.metric("Merdiven Basamak", f"{basamak} Adet", "Uygun" if basamak >= 17 else "HATA")
+        c1.metric("Merdiven Basamak", f"{basamak} Adet", "Uygun" if basamak >= 17 else "HATA (<17)")
         c2.metric("Kolon Taraması", "Tespit Edildi" if tarama > 0 else "Eksik")
         
+        # 2. Çakıştırma
         st.subheader("🔍 Mimari-Statik Çakıştırma Analizi")
-        comp_img = compare_dxf_layers("temp_m.dxf", "temp_s.dxf")
-        if comp_img:
-            st.image(comp_img, caption="Mavi: Mimari, Kırmızı: Statik")
-        else:
-            st.warning("DXF çizimleri görselleştirilemedi, ancak metinsel analizler yürütülebilir.")
-        
-        st.success("Mühendislik ve geometri analizleri tamamlandı.")
+        with st.spinner("Çizimler üst üste bindiriliyor..."):
+            img = compare_dxf_layers("m.dxf", "s.dxf")
+            if img:
+                st.image(img, caption="Mavi: Mimari, Kırmızı: Statik")
+            else:
+                st.error("Çizim motoru dosyayı render edemedi. DXF dosyanızın blok yapısı karmaşık olabilir.")
     else:
-        st.warning("Lütfen mimari ve statik dosyaları yükleyin.")
+        st.warning("Lütfen her iki DXF dosyasını da yükleyin.")
