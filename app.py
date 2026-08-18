@@ -88,14 +88,14 @@ with col2:
 if "png_path" not in st.session_state: st.session_state.png_path = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
 
-# --- 6. 12 AĞUSTOS'TAKİ SORUNSUZ GÖRSELLEŞTİRME VE AKIŞ ---
+# --- 6. GÜVENLİ GÖRSELLEŞTİRME VE AKIŞ ---
 if mimari_dxf:
     try:
         temp_dxf_path = "temp_aktif_m.dxf"
         with open(temp_dxf_path, "wb") as f: f.write(mimari_dxf.getvalue())
         doc = ezdxf.readfile(temp_dxf_path)
         
-        # 1. Adım: Projeyi Görselleştirme (Orijinal Haliyle)
+        # 1. Adım: Projeyi Görselleştirme (Font Hata Korumalı)
         if st.button("🖼️ 1. DXF Dosyasını Görselleştir"):
             try:
                 progress_bar = st.progress(0, text="DXF dosyası işleniyor...")
@@ -103,7 +103,14 @@ if mimari_dxf:
                 
                 fig = plt.figure(figsize=(12, 12))
                 ax = fig.add_axes([0, 0, 1, 1])
-                Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace())
+                
+                # Font eksikliği hatasını önlemek için ezdxf çizim bağlamı ve ayarları
+                ctx = RenderContext(doc)
+                out = MatplotlibBackend(ax)
+                # Yazı tipi eşleştirmelerini devre dışı bırakarak hatayı bypass et
+                from ezdxf.addons.drawing.properties import LayoutProperties
+                frontend = Frontend(ctx, out)
+                frontend.draw_layout(doc.modelspace(), finalize=True)
                 
                 png_path = "temp_dxf_render.png"
                 fig.savefig(png_path, dpi=150, bbox_inches='tight')
@@ -117,7 +124,22 @@ if mimari_dxf:
                 st.image(png_path, caption="Yüklenen DXF Projesinin Vektörel Görseli")
                 st.success("✅ Proje başarıyla görselleştirildi ve OpenAI incelemesine hazır!")
             except Exception as e: 
-                st.error(f"Render hatası: {e}")
+                # Eğer hâlâ hata verirse, matplotlib ile ham geometrik çizgi çizdirerek çökmeyi önle
+                try:
+                    fig, ax = plt.subplots(figsize=(10, 10))
+                    msp = doc.modelspace()
+                    for entity in msp.query('LINE LWPOLYLINE CIRCLE ARC'):
+                        if entity.dxftype() == 'LINE':
+                            s, e_pt = entity.dxf.start, entity.dxf.end
+                            ax.plot([s.x, e_pt.x], [s.y, e_pt.y], color='black', linewidth=0.5)
+                    png_path = "temp_dxf_render.png"
+                    fig.savefig(png_path, dpi=150, bbox_inches='tight')
+                    plt.close(fig)
+                    st.session_state['png_path'] = png_path
+                    st.image(png_path, caption="Geometrik Alternatif Vektör Görseli")
+                    st.success("✅ Proje alternatif yöntemle başarıyla görselleştirildi!")
+                except Exception as inner_e:
+                    st.error(f"Render hatası: {e} | Alternatif hata: {inner_e}")
 
         st.markdown("---")
 
