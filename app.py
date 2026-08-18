@@ -3,6 +3,7 @@ import ezdxf
 import json
 import base64
 import io
+import time
 import matplotlib.pyplot as plt
 from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
@@ -10,7 +11,7 @@ from openai import OpenAI
 from pypdf import PdfReader
 
 # Sayfa Ayarları
-st.set_page_config(layout="wide", page_title="Master Denetim Motoru - Tam Donanımlı Sistem")
+st.set_page_config(layout="wide", page_title="Master Denetim Motoru - Komple Sistem")
 
 # --- 1. ŞİFRE KORUMASI ---
 def check_password():
@@ -28,75 +29,33 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# --- 2. BELEDİYE VERİTABANI & SÖZLÜK ---
+# --- 2. BELEDİYE VERİTABANI ---
 BELEDIYE_VERITABANI = {
     "Bakanlık Standartları (Genel PAİY & TBDY 2018) [Varsayılan]": {
-        "asansor_min": 1.48, "asansor_max": 5.00, "min_beton": "C30",
-        "ozel_sartlar": "Planlı Alanlar İmar Yönetmeliği tam metni ve ulusal teknik yönetmelikler esastır."
+        "min_beton": "C30", "ozel_sartlar": "Planlı Alanlar İmar Yönetmeliği esastır."
     },
-    "Adana Büyükşehir Belediyesi": {"asansor_min": 1.48, "asansor_max": 5.00, "min_beton": "C35", "ozel_sartlar": "Adana Büyükşehir İmar Yönetmeliği, ana arter nizamı ve toplu ulaşım entegrasyon kuralları geçerlidir."},
-    "Adana - Çukurova Belediyesi": {"asansor_min": 1.48, "asansor_max": 5.00, "min_beton": "C35", "ozel_sartlar": "Çukurova 1/1000 İmar Planı Notları, yerel zemin koşulları ve Deprem Bölgeleri Yönetmeliği zorunludur."},
-    "İstanbul Büyükşehir Belediyesi": {"asansor_min": 1.50, "asansor_max": 5.00, "min_beton": "C35", "ozel_sartlar": "İBB İmar Yönetmeliği, boğaziçi öngörünüm kuralları ve akustik rapor zorunluluğu vardır."},
-    "Balıkesir Büyükşehir Belediyesi": {"asansor_min": 1.48, "asansor_max": 5.00, "min_beton": "C30", "ozel_sartlar": "Balıkesir Büyükşehir İmar Yönetmeliği, kırsal kalkınma ve turizm bölgesi yapılaşma esasları geçerlidir."}
+    "Adana Büyükşehir Belediyesi": {
+        "min_beton": "C35", "ozel_sartlar": "Adana Büyükşehir İmar Yönetmeliği kuralları geçerlidir."
+    },
+    "Adana - Çukurova Belediyesi": {
+        "min_beton": "C35", "ozel_sartlar": "Çukurova 1/1000 İmar Planı Notları zorunludur."
+    }
 }
 
 # --- 3. YARDIMCI VE MÜHENDİSLİK FONKSİYONLARI ---
-def read_pdf_text(uploaded_file):
+def check_merdiven_ve_tarama(doc):
     try:
-        pdf_bytes = uploaded_file.read()
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        text = ""
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted: text += extracted + "\n"
-        return text if text.strip() else "PDF dosyasından metin çıkarılamadı."
-    except Exception as e: return f"PDF okuma hatası: {e}"
-
-def check_merdiven_ve_tarama(dxf_path):
-    try:
-        doc = ezdxf.readfile(dxf_path)
         msp = doc.modelspace()
         basamak = len([l for l in msp.query('LINE') if l.dxf.layer.lower() in ['merdiven', 'stairs', 'merdiven-basamak']])
         tarama = len([h for h in msp.query('HATCH') if h.dxf.layer.lower() in ['kolon', 'column', 'st-kolon']])
         return basamak, tarama
     except: return 0, 0
 
-def dxf_to_image(dxf_filepath):
+def analyze_dxf_structure(doc):
     try:
-        doc = ezdxf.readfile(dxf_filepath)
-        msp = doc.modelspace()
-        fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_axes([0, 0, 1, 1])
-        ctx = RenderContext(doc)
-        out = MatplotlibBackend(ax)
-        Frontend(ctx, out).draw_layout(msp, finalize=True)
-        img_path = "temp_dxf_render.png"
-        plt.savefig(img_path, dpi=150, bbox_inches='tight')
-        plt.close(fig)
-        with open(img_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    except Exception: return None
-
-def compare_dxf_layers(mimari_path, statik_path):
-    try:
-        doc_m = ezdxf.readfile(mimari_path)
-        doc_s = ezdxf.readfile(statik_path)
-        fig, ax = plt.subplots(figsize=(10, 10))
-        Frontend(RenderContext(doc_m), MatplotlibBackend(ax), color_mode='mono', style={'color': 'blue'}).draw_layout(doc_m.modelspace(), finalize=True)
-        Frontend(RenderContext(doc_s), MatplotlibBackend(ax), color_mode='mono', style={'color': 'red'}).draw_layout(doc_s.modelspace(), finalize=True)
-        img_path = "comparison.png"
-        plt.savefig(img_path, dpi=150, bbox_inches='tight')
-        plt.close(fig)
-        return img_path
-    except Exception: return None
-
-def analyze_dxf_structure(dxf_filepath):
-    try:
-        doc = ezdxf.readfile(dxf_filepath)
-        layers = [layer.dxf.name.lower() for layer in doc.layers]
         texts = [e.dxf.text.strip() for e in doc.modelspace().query('TEXT MTEXT') if e.dxf.text.strip()]
-        return layers, texts
-    except Exception: return [], []
+        return texts
+    except: return []
 
 # --- 4. API VE SIDEBAR ---
 with st.sidebar:
@@ -112,77 +71,84 @@ aktif_sartlar = BELEDIYE_VERITABANI[secilen_belediye_profil]
 st.success(f"📌 **Aktif Mevzuat Şartları:** {aktif_sartlar['ozel_sartlar']} (Min. Beton: {aktif_sartlar['min_beton']})")
 
 st.markdown("---")
-st.subheader("📁 Ruhsat, Proje, Hesap Raporu ve İdari Evrak Yükleme Paneli")
+st.subheader("📁 Proje ve Rapor Yükleme Paneli")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 🏛️ Mimari & İdari Projeler")
-    mimari_dxf = st.file_uploader("Mimari Proje (DXF)", type=["dxf"], key="mimari")
-    idari_evraklar = st.file_uploader("İmar Durumu / Aplikasyon / Plankote (PDF/Görsel)", type=["pdf", "png", "jpg"], key="idari")
-
+    mimari_dxf_file = st.file_uploader("Mimari Proje (DXF)", type=["dxf"], key="mimari")
 with col2:
-    st.markdown("### 🧱 Statik & Yasal Projeler")
-    statik_dxf = st.file_uploader("Statik Proje (DXF)", type=["dxf"], key="statik")
-    statik_rapor = st.file_uploader("Statik Hesap Raporu (PDF)", type=["pdf", "txt"], key="rapor")
+    statik_dxf_file = st.file_uploader("Statik Proje (DXF)", type=["dxf"], key="statik")
 
-if "audit_data" not in st.session_state: st.session_state.audit_data = None
+if "png_path" not in st.session_state: st.session_state.png_path = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
-if "show_interactive_form" not in st.session_state: st.session_state.show_interactive_form = False
 
-# --- 6. ÇALIŞTIRMA BUTONU VE YÜKLEME EKRANI ---
-if st.button("🏛️ Kapsamlı Mühendislik ve Kot/Aks Denetimini Başlat"):
-    if mimari_dxf or statik_dxf or statik_rapor or idari_evraklar:
-        # Eski havalı yükleme ekranı (Spinner) aktif!
-        with st.spinner(f"🔄 '{secilen_belediye_profil}' şartlarıyla kot, aks, merdiven ve çakıştırma analizleri yükleniyor..."):
-            
-            if mimari_dxf:
-                with open("temp_m.dxf", "wb") as f: f.write(mimari_dxf.getvalue())
-            if statik_dxf:
-                with open("temp_s.dxf", "wb") as f: f.write(statik_dxf.getvalue())
-            
-            # Otomatik Mühendislik Bulguları
-            if mimari_dxf:
-                basamak, tarama = check_merdiven_ve_tarama("temp_m.dxf")
-                st.subheader("🛠️ Otomatik Geometrik ve Mühendislik Bulguları")
-                c1, c2 = st.columns(2)
-                c1.metric("Merdiven Basamak Sayısı", f"{basamak} Adet", "Uygun" if basamak >= 17 else "HATA (<17)")
-                c2.metric("Kolon Taraması (Hatch)", "Tespit Edildi" if tarama > 0 else "Eksik")
-
-            # Görselleştirme Özelliği (Çakıştırma)
-            if mimari_dxf and statik_dxf:
-                st.subheader("🔍 Mimari (Mavi) - Statik (Kırmızı) Çakıştırma Görselleştirmesi")
-                comp_img = compare_dxf_layers("temp_m.dxf", "temp_s.dxf")
-                if comp_img:
-                    st.image(comp_img, caption="Mavi: Mimari Proje, Kırmızı: Statik Proje", use_container_width=True)
-                else:
-                    st.warning("Çizim motoru görselleştirmeyi tamamlayamadı, metinsel denetim yürütülüyor.")
-
-            # AI Raporlama Hazırlığı
-            m_texts = analyze_dxf_structure("temp_m.dxf")[1] if mimari_dxf else []
-            s_texts = analyze_dxf_structure("temp_s.dxf")[1] if statik_dxf else []
-            
-            system_prompt = f"Sen kıdemli bir İnşaat Mühendisi ve Belediye İmar Baş Kontrolörüsün. Seçilen İdare: {secilen_belediye_profil}"
-            user_prompt = "Projeleri incele ve resmi yapı denetim raporu formatında eksiklikleri çıkar."
-            
+# --- İSTEDİĞİN GÖRSELLEŞTİRME VE DENETİM AKIŞI ---
+if mimari_dxf_file:
+    try:
+        # Geçici kaydet ve ezdxf ile aç
+        temp_dxf_path = "temp_aktif_m.dxf"
+        with open(temp_dxf_path, "wb") as f: f.write(mimari_dxf_file.getvalue())
+        doc = ezdxf.readfile(temp_dxf_path)
+        
+        # 1. Adım: Projeyi Görselleştirme Butonu
+        if st.button("🖼️ 1. DXF Dosyasını Görselleştir"):
             try:
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                    max_tokens=2000
-                )
-                st.session_state.master_report = response.choices[0].message.content
-                st.success("Mühendislik denetim ve görselleştirme analizi başarıyla tamamlandı!")
-            except Exception as e:
-                st.error(f"AI Analiz Hatası: {e}")
-    else:
-        st.warning("Lütfen denetimi başlatmak için en azından bir proje dosyası yükleyin.")
+                progress_bar = st.progress(0, text="DXF dosyası işleniyor...")
+                
+                progress_bar.progress(50, text="%50 - Vektörler ve katmanlar çiziliyor...")
+                fig = plt.figure(figsize=(10, 10))
+                ax = fig.add_axes([0, 0, 1, 1])
+                Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace(), finalize=True)
+                
+                png_path = "temp_dxf_render.png"
+                fig.savefig(png_path, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                
+                progress_bar.progress(100, text="%100 - Tamamlandı!")
+                time.sleep(0.3)
+                progress_bar.empty()
+                
+                st.session_state['png_path'] = png_path
+                st.image(png_path, caption="Yüklenen DXF Projesinin Vektörel Görseli")
+                st.success("✅ Proje başarıyla görselleştirildi ve OpenAI incelemesine hazır!")
+            except Exception as e: 
+                st.error(f"Render hatası: {e}")
 
-# --- 7. RAPOR GÖSTERİMİ ---
+        st.markdown("---")
+
+        # 2. Adım: OpenAI ile Proje Denetimini Başlat
+        if st.button("🤖 2. OpenAI ile Proje Denetimini Başlat"):
+            if st.session_state.get('png_path'):
+                with st.spinner("🔄 Mühendislik kuralları taranıyor ve rapor hazırlanıyor..."):
+                    basamak, tarama = check_merdiven_ve_tarama(doc)
+                    texts = analyze_dxf_structure(doc)
+                    
+                    st.subheader("🛠️ Otomatik Geometrik ve Mühendislik Bulguları")
+                    c1, c2 = st.columns(2)
+                    c1.metric("Merdiven Basamak Sayısı", f"{basamak} Adet", "Uygun" if basamak >= 17 else "HATA (<17)")
+                    c2.metric("Kolon Taraması (Hatch)", "Tespit Edildi" if tarama > 0 else "Eksik")
+
+                    system_prompt = f"Sen kıdemli bir İnşaat Mühendisi ve İmar Baş Kontrolörüsün. Seçilen İdare: {secilen_belediye_profil}"
+                    user_prompt = f"DXF içinden okunan metinler ve bulgular doğrultusunda eksiklik raporu hazırla. Merdiven: {basamak}, Kolon Taraması: {tarama}"
+                    
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                        max_tokens=2000
+                    )
+                    st.session_state.master_report = response.choices[0].message.content
+                    st.success("✅ Proje denetimi tamamlandı!")
+            else:
+                st.warning("⚠️ Lütfen önce 1. Adım ile DXF dosyasını görselleştirin.")
+
+    except Exception as e:
+        st.error(f"DXF dosyası okunamadı: {e}")
+
+# --- RAPOR GÖSTERİMİ ---
 if st.session_state.master_report:
     st.markdown("---")
     st.header("📑 Resmi Mühendislik İnceleme Tutanağı")
     st.markdown(st.session_state.master_report)
-    
     st.download_button(
         label="📥 Tutanağı İndir (.md)",
         data=st.session_state.master_report,
