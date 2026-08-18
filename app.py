@@ -7,13 +7,10 @@ import time
 import matplotlib.pyplot as plt
 from ezdxf.addons.drawing import RenderContext, Frontend
 from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
-from ezdxf.addons.drawing.config import Configuration
 from openai import OpenAI
 from pypdf import PdfReader
 from PIL import Image
 
-# AutoCAD fontlarını ve render motorunu hatasız çalıştırmak için:
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans'] 
 st.set_page_config(layout="wide", page_title="MRB Mimarlık - Profesyonel Denetim")
 
 # --- 1. ŞİFRE ---
@@ -24,20 +21,29 @@ if not st.session_state.auth:
         st.rerun()
     st.stop()
 
-# --- 2. PROFESYONEL RENDER MOTORU ---
-def render_autocad_style(dxf_path, output_path, color='black'):
+# --- 2. HATA VERMEYEN PROFESYONEL RENDER MOTORU ---
+def render_autocad_style(dxf_path, output_path, line_color='black'):
     doc = ezdxf.readfile(dxf_path)
     msp = doc.modelspace()
-    fig = plt.figure(figsize=(20, 20))
+    
+    fig = plt.figure(figsize=(15, 15))
     ax = fig.add_axes([0, 0, 1, 1])
     
-    # Render motorunu 'no fonts' hatası almadan çalıştırmak için config:
+    # Font hatası veren MTEXT/TEXT öğelerini geçici olarak süzerek (gizleyerek) çizdiriyoruz
+    # Böylece AutoCAD geometrisi, çizgileri, kolonları ve taramaları tam olarak görünür
+    class SafeFrontend(Frontend):
+        def draw_mtext_entity(self, entity, properties):
+            pass # Yazı hatasını engellemek için pas geç
+        def draw_text_entity(self, entity, properties):
+            pass # Yazı hatasını engellemek için pas geç
+
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax)
-    # Varsayılan fontları zorla, hata verirse es geç
-    frontend = Frontend(ctx, out)
+    frontend = SafeFrontend(ctx, out)
     frontend.draw_layout(msp, finalize=True)
     
+    ax.set_aspect('equal')
+    ax.axis('off')
     fig.savefig(output_path, dpi=300, bbox_inches='tight', transparent=True)
     plt.close(fig)
 
@@ -69,7 +75,8 @@ if st.session_state.get("m_png") and st.session_state.get("s_png"):
     if st.button("🔀 Projeleri Çakıştır (Overlay)"):
         m = Image.open("m_render.png").convert("RGBA")
         s = Image.open("s_render.png").convert("RGBA")
-        # Mimariyi maviye, statiği kırmızıya çevirerek üst üste bindir
+        
+        # Mimariyi mavi, statiği kırmızı yap
         m_blue = Image.new("RGBA", m.size, (0, 0, 255, 255))
         m = Image.composite(m_blue, m, m.split()[3]) 
         s_red = Image.new("RGBA", s.size, (255, 0, 0, 255))
