@@ -117,7 +117,7 @@ if "audit_data" not in st.session_state: st.session_state.audit_data = None
 if "master_report" not in st.session_state: st.session_state.master_report = None
 if "show_interactive_form" not in st.session_state: st.session_state.show_interactive_form = False
 
-# --- 6. ADIM 1: GÖRSELLEŞTİRME (FONT HATASI KORUMALI) ---
+# --- 6. ADIM 1: ORİJİNAL SORUNSUZ GÖRSELLEŞTİRME ---
 if mimari_dxf:
     try:
         temp_dxf_path = "temp_aktif_m.dxf"
@@ -127,16 +127,12 @@ if mimari_dxf:
         if st.button("🖼️ 1. DXF Dosyasını Görselleştir"):
             try:
                 progress_bar = st.progress(0, text="DXF dosyası işleniyor...")
-                progress_bar.progress(50, text="%50 - Vektörler çiziliyor (Fontlar bypass ediliyor)...")
+                progress_bar.progress(50, text="%50 - Vektörler ve katmanlar çiziliyor...")
                 
                 fig = plt.figure(figsize=(12, 12))
                 ax = fig.add_axes([0, 0, 1, 1])
-                
-                ctx = RenderContext(doc)
-                out = MatplotlibBackend(ax)
-                # Font eksikliği hatasını önlemek için güvenli render yapılandırması
-                from ezdxf.addons.drawing.properties import RenderProperties
-                Frontend(ctx, out).draw_layout(doc.modelspace(), finalize=True)
+                # Orijinal, hiçbir hata vermeyen sade ve sağlam çizim yöntemi
+                Frontend(RenderContext(doc), MatplotlibBackend(ax)).draw_layout(doc.modelspace())
                 
                 png_path = "temp_dxf_render.png"
                 fig.savefig(png_path, dpi=150, bbox_inches='tight')
@@ -150,23 +146,7 @@ if mimari_dxf:
                 st.image(png_path, caption="Yüklenen DXF Projesinin Vektörel Görseli")
                 st.success("✅ Proje başarıyla görselleştirildi ve OpenAI incelemesine hazır!")
             except Exception as e: 
-                # Fallback olarak matplotlib üzerinden basit çizim dene veya hatayı göster
-                st.warning(f"Detaylı vektör motoru font bulamadı, alternatif çizime geçiliyor... ({e})")
-                try:
-                    fig, ax = plt.subplots(figsize=(10, 10))
-                    for entity in doc.modelspace().query('LINE LWPOLYLINE CIRCLE ARC'):
-                        if entity.dxftype() == 'LINE':
-                            start = entity.dxf.start
-                            end = entity.dxf.end
-                            ax.plot([start.x, end.x], [start.y, end.y], color='black', linewidth=0.5)
-                    png_path = "temp_dxf_render.png"
-                    fig.savefig(png_path, dpi=150, bbox_inches='tight')
-                    plt.close(fig)
-                    st.session_state['png_path'] = png_path
-                    st.image(png_path, caption="Alternatif Vektör Çizimi")
-                    st.success("✅ Alternatif yöntemle görselleştirildi!")
-                except Exception as ex:
-                    st.error(f"Render hatası çözülemedi: {ex}")
+                st.error(f"Render hatası: {e}")
 
         st.markdown("---")
 
@@ -177,7 +157,7 @@ if mimari_dxf:
                     
                     pdf_metni = read_pdf_text(statik_rapor) if statik_rapor else ""
                     idari_metin = read_pdf_text(idari_evraklar) if idari_evraklar else ""
-                    basamak, tarama = check_merdiven_vе_tarama(temp_dxf_path)
+                    basamak, tarama = check_merdiven_ve_tarama(temp_dxf_path)
                     eng_details = analyze_engineering_details(temp_dxf_path, pdf_metni)
                     
                     st.subheader("🛠️ Otomatik Mühendislik & Geometri Bulguları")
@@ -286,4 +266,4 @@ if st.session_state.master_report and st.session_state.audit_data:
         with col_f3:
             render_clean_interactive_section("3️⃣ Yönetmelik Ekleri", audit_d.get("yonetmelik_ekleri", {}))
         with col_f4:
-            render_clean_interactive_section("4️⃣ Resmi Unsurlar", audit_d.get("resmi_form_unsurlari", {}))
+            render_clean_interactive_section("4️⃣ Resmi Unsurlar", audit_d.get("resmi_unsurlar", {}))
